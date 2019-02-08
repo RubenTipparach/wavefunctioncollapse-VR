@@ -22,6 +22,8 @@ public class ModulePrototype : MonoBehaviour {
 		public ModulePrototype[] ExcludedNeighbours;
 
 		public bool EnforceWalkableNeighbor = false;
+
+		public bool IsOcclusionPortal = false;
 	}
 
 	[System.Serializable]
@@ -55,8 +57,10 @@ public class ModulePrototype : MonoBehaviour {
 			this.Rotation = 0;
 		}
 	}
-	
+
 	public float Probability = 1.0f;
+	public bool Spawn = true;
+	public bool IsInterior = false;
 
 	public HorizontalFaceDetails Left;
 	public VerticalFaceDetails Down;
@@ -64,9 +68,6 @@ public class ModulePrototype : MonoBehaviour {
 	public HorizontalFaceDetails Right;
 	public VerticalFaceDetails Up;
 	public HorizontalFaceDetails Forward;
-
-	public bool CreateRotatedVariants = true;
-	public bool Spawn = true;
 
 	public FaceDetails[] Faces {
 		get {
@@ -95,7 +96,7 @@ public class ModulePrototype : MonoBehaviour {
 	
 #if UNITY_EDITOR
 	[DrawGizmo(GizmoType.InSelectionHierarchy | GizmoType.NotInSelectionHierarchy)]
-	static void DrawGizmoForMyScript(ModulePrototype modulePrototype, GizmoType gizmoType) {
+	static void DrawGizmo(ModulePrototype modulePrototype, GizmoType gizmoType) {
 		Vector3 position = modulePrototype.transform.position;
 
 		if (ModulePrototype.style == null) {
@@ -113,6 +114,12 @@ public class ModulePrototype : MonoBehaviour {
 			if (modulePrototype.Faces[i].Walkable) {
 				Gizmos.color = Color.red;
 				Gizmos.DrawLine(modulePrototype.transform.position + Vector3.down * 0.1f, modulePrototype.transform.position + modulePrototype.transform.rotation * Orientations.Rotations[i] * Vector3.forward + Vector3.down * 0.1f);
+			}
+			if (modulePrototype.Faces[i].IsOcclusionPortal) {
+				Gizmos.color = Color.blue;
+
+				var dir = modulePrototype.transform.rotation * Orientations.Rotations[i] * Vector3.forward;
+				Gizmos.DrawWireCube(modulePrototype.transform.position + dir, (Vector3.one - new Vector3(Mathf.Abs(dir.x), Mathf.Abs(dir.y), Mathf.Abs(dir.z))) * 2f);
 			}
 		}
 	}
@@ -212,11 +219,6 @@ public class ModulePrototype : MonoBehaviour {
 				}
 			}			
 		}
-
-		this.CreateRotatedVariants = !(this.Up.Invariant
-			&& this.Down.Invariant
-			&& (this.Forward.Connector == this.Back.Connector && this.Left.Connector == this.Right.Connector && this.Forward.Connector == this.Left.Connector)
-			&& (this.Forward.Symmetric || (this.Forward.Flipped == this.Back.Flipped && this.Left.Flipped == this.Right.Flipped && this.Forward.Flipped == this.Right.Flipped)));
 	}
 
 	private int getNewConnector(Dictionary<int, Fingerprint> dict) {
@@ -225,49 +227,25 @@ public class ModulePrototype : MonoBehaviour {
 		return result;
 	}
 
-	public static List<Module> CreateModules(bool respectNeigborExclusions) {
-		int count = 0;
-		var modules = new List<Module>();
-		
-		foreach (var prototype in ModulePrototype.GetAll()) {
-			for (int face = 0; face < 6; face++) {
-				if (prototype.Faces[face].ExcludedNeighbours == null) {
-					prototype.Faces[face].ExcludedNeighbours = new ModulePrototype[0];
-				}
+	public bool CompareRotatedVariants(int r1, int r2) {
+		if (!(this.Faces[Orientations.UP] as VerticalFaceDetails).Invariant || !(this.Faces[Orientations.DOWN] as VerticalFaceDetails).Invariant) {
+			return false;
+		}
+
+		for (int i = 0; i < 4; i++) {
+			var face1 = this.Faces[Orientations.Rotate(Orientations.HorizontalDirections[i], r1)] as HorizontalFaceDetails;
+			var face2 = this.Faces[Orientations.Rotate(Orientations.HorizontalDirections[i], r2)] as HorizontalFaceDetails;
+
+			if (face1.Connector != face2.Connector) {
+				return false;
 			}
 
-			for (int rotation = 0; rotation < (prototype.CreateRotatedVariants ? 4 : 1); rotation++) {
-				modules.Add(new Module(prototype, rotation, count));
-				count++;
+			if (!face1.Symmetric && !face2.Symmetric && face1.Flipped != face2.Flipped) {
+				return false;
 			}
 		}
 
-		foreach (var module in modules) {
-			module.PossibleNeighbors = new Module[6][];
-			for (int direction = 0; direction < 6; direction++) {
-				var face = module.Prototype.Faces[Orientations.Rotate(direction, module.Rotation)];
-				module.PossibleNeighbors[direction] = modules
-					.Where(neighbor => module.Fits(direction, neighbor)
-						&& (!respectNeigborExclusions || (
-							!face.ExcludedNeighbours.Contains(neighbor.Prototype)
-							&& !neighbor.Prototype.Faces[Orientations.Rotate((direction + 3) % 6, neighbor.Rotation)].ExcludedNeighbours.Contains(module.Prototype))
-							&& (!face.EnforceWalkableNeighbor || neighbor.Prototype.Faces[Orientations.Rotate((direction + 3) % 6, neighbor.Rotation)].Walkable)
-							&& (face.Walkable || !neighbor.Prototype.Faces[Orientations.Rotate((direction + 3) % 6, neighbor.Rotation)].EnforceWalkableNeighbor))
-					)
-					.ToArray();
-			}
-		}
-
-		return modules;
-	}
-
-	public static IEnumerable<ModulePrototype> GetAll() {
-		foreach (Transform transform in GameObject.FindObjectOfType<ModulePrototype>().transform.parent) {
-			var item = transform.GetComponent<ModulePrototype>();
-			if (item != null && item.enabled) {
-				yield return item;
-			}
-		}
+		return true;
 	}
 
 	void Update() { }
